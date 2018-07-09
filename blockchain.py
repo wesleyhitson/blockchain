@@ -3,6 +3,7 @@ import json
 from time import time
 from uuid import uuid4
 from textwrap import dedent
+from urllib.parse import urlparse
 
 from flask import Flask, jsonify, request
 
@@ -11,6 +12,7 @@ class Blockchain(object):
     def __init__(self):
         self.chain = []
         self.current_transactions = []
+        self.nodes = set()
 
         # Create the genesis block
         self.new_block(previous_hash=1, proof=100)
@@ -39,7 +41,7 @@ class Blockchain(object):
         self.chain.append(block)
         return block
 
-    def new_transactions(self, sender, recipient, amount):
+    def new_transaction(self, sender, recipient, amount):
         """
         Creates a new transaction to go into the next mined Block
 
@@ -105,6 +107,81 @@ class Blockchain(object):
         guess_hash = hashlib.sha256(guess).hexdigest()
         return guess_hash[:4] == "0000"
 
+    def register_nodes(self, address):
+        """
+        Add a new node to the list of nodes
+
+        :param address: <str> Address of new node, eg. 'http://192.168.0.5:5000'
+        :return: None
+        """
+
+        passed_url = urlparse(address)
+        self.nodes.add(passed_url.netloc)
+
+    def valid_chain(self, chain):
+        """
+        Determine if a given blockchain is valid
+
+        :param chain: <list> A blockchain
+        :return: <bool> True if valid
+        """
+
+        last_block = chain[0]
+        current_index = 1
+
+        while current_index < len(chain):
+            block = chain[current_index]
+            print(f'{last_block}')
+            print(f'{block}')
+            print("\n------------\n")
+            # Check that the hash of the previous block is correct
+            if block['previous_hash'] != self.hash[last_block]:
+                return False
+
+
+            # Check that the Proof of Work is correct
+            if not self.valid_proof(last_block['proof'], block['proof']):
+                return False
+
+            last_block = block
+            current_index += 1
+
+        return True
+
+    def resolve_conflicts(self):
+        """
+        This is our Consensus Algorithm, it resolves conflicts by replacing
+        our chain with the longest chain in the network.
+
+        :return: <bool> True if our chain was replaced
+        """
+
+        neighbors = self.nodes
+        new_chain = None
+
+        # We're only looking for chains longer than ours
+        max_len = len(self.chain)
+
+        # Grab and verify the chains from all the nodes in our network
+        for node in neighbors:
+            response = requests.get(f'http://{node}/chain')
+
+            if response.status_code == 200:
+                length = response.json()['length']
+                chain = response.json()['chain']
+
+                # Check if the length is longer and the chain is valid
+                if length > max_len and self.valid_chain(chain):
+                    max_len = length
+                    new_chain = chain
+
+        # Replace our chain if we discovered a new longer valid chain
+        if new_chain:
+            self.chain = new_chain
+            return True
+
+        return False
+
 
 # Instantiate our Node
 app = Flask(__name__)
@@ -142,6 +219,8 @@ def mine():
         'proof': block['proof'],
         'previous_hash': block['previous_hash']
     }
+
+    return jsonify(response), 200
 
 @app.route('/transactions/new', methods=['POST'])
 def new_transaction():
