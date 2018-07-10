@@ -1,5 +1,6 @@
 import hashlib
 import json
+import requests
 from time import time
 from uuid import uuid4
 from textwrap import dedent
@@ -135,7 +136,7 @@ class Blockchain(object):
             print(f'{block}')
             print("\n------------\n")
             # Check that the hash of the previous block is correct
-            if block['previous_hash'] != self.hash[last_block]:
+            if block['previous_hash'] != self.hash(last_block):
                 return False
 
 
@@ -246,6 +247,40 @@ def full_chain():
     }
     return jsonify(response), 200
 
+@app.route('/nodes/register', methods=['POST'])
+def register_nodes():
+    values = request.get_json()
+
+    nodes = values.get('nodes')
+    if nodes is None:
+        return "Error: Please supply a valid list of nodes", 400
+
+    for node in nodes:
+        blockchain.register_nodes(node)
+
+    response = {
+        'message': 'New nodes have been added',
+        'total_nodes': list(blockchain.nodes)
+    }
+    return jsonify(response), 201
+
+@app.route('/nodes/resolve', methods=['GET'])
+def consensus():
+    replaced = blockchain.resolve_conflicts()
+
+    if replaced:
+        response = {
+            'message': 'Our chain was replaced',
+            'new_chain': blockchain.chain
+        }
+    else:
+        response = {
+            'message': 'Our chain is authoritative',
+            'chain': blockchain.chain
+        }
+
+    return jsonify(response), 200
+
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5001)
